@@ -2,6 +2,8 @@
 
 ## Output reports
 
+这里指的是host发送给slave的报文
+
 ### OUTPUT 0x01
 
 Rumble and subcommand.
@@ -30,6 +32,12 @@ NFC/IR MCU FW Update packet.
 
 ### OUTPUT 0x10
 
+实际上震动信息在配对完成以后，每150ms发送一次
+
+并不是 rumble信息是基于发送信息的频率来发的，目前是固定发送11个标准包会回一次rumble，这次的rumble和第11个包几乎同时。
+
+或者说每发10个包后，下一个包会附带一个rumble返回
+
 Rumble only. See OUTPUT 0x01 and "Rumble data" below.
 
 ### OUTPUT 0x11
@@ -55,7 +63,7 @@ The values for HF Band frequency and LF amplitude are encoded.
 | 2, 6     | `x01` - `x7F` (40.87Hz - 626.28Hz)         | Low Band Frequency.                                                      |
 | 3, 7     | `x40` - `x72` (0.0f - 1.0f)                | Low Band Amplitude. Safe max: `00 72`.                                   |
 | 2-3, 6-7 | `x80 40` - `x80 71` (0.01f - 0.98f)        | Byte `2`,`6` +0x80 enables intermediate LF amplitude. Real max: `80 FF`. |
- 
+
 For a rumble values table, example and the algorithm for frequency, check rumble_data_table.md.
 
 The byte values for frequency raise the frequency in Hz exponentially and not linearly.
@@ -64,6 +72,8 @@ Don't use real maximum values for Amplitude. Otherwise, they can damage the line
 These safe amplitude ranges are defined by Switch HID library.
 
 ## Input reports
+
+这里指slave发送给host的报文
 
 ### INPUT 0x3F
 
@@ -77,6 +87,8 @@ This input packet is pushed to the host when a button is pressed or released, an
 |  4-11   | `x00 80 00 80 00 80 00 80` | Filler data               |
 
 #### Stick hat data
+
+joycon横握的时候，摇杆的八个方向对应的值如下图所示，L和R，ZL和ZR同时只能发出来一个，取决于你是左手柄还是右手柄
 
 Hold your controller sideways so that SL, SYNC, and SR line up with the screen. Pushing the stick towards a direction in this table will cause that value to be sent.
 
@@ -97,11 +109,15 @@ Hold your controller sideways so that SL, SYNC, and SR line up with the screen. 
 
 Standard input reports used for subcommand replies.
 
+子命令报文id
+
 ### INPUT 0x23
 
 NFC/IR MCU FW update input report.
 
 ### INPUT 0x30
+
+标准报文命令，发送按键信息以及imu数据
 
 Standard full mode - input reports with IMU data instead of subcommand replies. Pushes current state @60Hz, or @120Hz if Pro Controller.
 
@@ -119,6 +135,8 @@ Unknown. Sends standard input reports.
 
 ### Standard input report format
 
+这里介绍标准报文的格式
+
 The 3rd byte belongs entirely to the Right Joy-Con, while the 5th byte belongs entirely to the Left Joy-Con.
 The middle byte is shared between the controllers.
 
@@ -126,15 +144,15 @@ The middle byte is shared between the controllers.
 
 |   Byte #           |        Sample         | Remarks                                                                             |
 |:------------------:|:---------------------:| ----------------------------------------------------------------------------------- |
-| 0                  | `x21`, `x30`, `x31`   | Input report ID                                                                     |
-| 1                  | `x00` - `xFF`         | Timer. Increments very fast. Can be used to estimate excess Bluetooth latency.      |
-| 2 high nibble      | `0` - `9`             | Battery level. 8=full, 6=medium, 4=low, 2=critical, 0=empty. LSB=Charging.          |
-| 2 low nibble       | `x0`, `x1`, `xE`      | Connection info. `(con_info >> 1) & 3` - 3=JC, 0=Pro/ChrGrip. `con_info & 1` - 1=Switch/USB powered. |
+| 0                  | `x21`, `x30`, `x31`   | Input report ID 报文头                                                                 |
+| 1                  | `x00` - `xFF`         | Timer. Increments very fast. Can be used to estimate excess Bluetooth latency.理论这里应该是报文序号，用来确认是否丢包的 |
+| 2 high nibble高半字节  | `0` - `9`             | Battery level. 8=full, 6=medium, 4=low, 2=critical, 0=empty. LSB=Charging.          |
+| 2 low nibble低半字节   | `x0`, `x1`, `xE`      | Connection info. `(con_info >> 1) & 3` - 3=JC, 0=Pro/ChrGrip. `con_info & 1` - 1=Switch/USB powered. |
 | 3, 4, 5            | `x41 00 82`           | Button status (see below table)                                                     |
 | 6, 7, 8            | --                    | Left analog stick data                                                              |
 | 9, 10, 11          | --                    | Right analog stick data                                                             |
 | 12                 | `x70`, `xC0`, `xB0`   | Vibrator input report. Decides if next vibration pattern should be sent.            |
-| 13  (ID `x21`)     | `x00`, `x80`, `x90`, `x82`| ACK byte for subcmd reply. ACK: MSB is `1`, NACK: MSB is `0`. If reply is ACK and has data, `byte12 & 0x7F` gives as the type of data. If simple ACK or NACK, the data type portion is `x00` |
+| 13  (ID `x21`)     | `x00`, `x80`, `x90`, `x82`| ACK byte for subcmd reply. ACK: MSB is `1`, NACK: MSB is `0`. If reply is ACK and has data, `byte12 & 0x7F` gives as the type of data. If simple ACK or NACK, the data type portion is `x00` 这里有点问题，这里ack具体意义没看懂 |
 | 14  (ID `x21`)     | `x02`, `x10`, `x03`   | Reply-to subcommand ID. The subcommand ID is used as-is.                            |
 | 15-49  (ID `x21`)  | --                    | Subcommand reply data. Max 35 bytes (excludes 2 byte subcmd ack above).             |
 | 13-49  (ID `x23`)  | --                    | NFC/IR MCU FW update input report. Max 37 bytes.                                    |
@@ -144,15 +162,24 @@ The middle byte is shared between the controllers.
 (Note2: In the `21` input reports, the byte13 (ACK byte) can be parsed as follows: `byte13 >> 7` tells us if it's an ACK or NACK. If it's an ACK, check `byte13 & 0x7F` to see what type of data it has. If it is a simple ACK, the byte13 is `x80` and thus the type of data is `x00`. If we expect a certain order of received packets, we can hardcode these byte13 values. If it's a NACK, the byte13 is always `x00`)
 
 #### Standard input report - buttons
-| Byte       | Bit `x01` | `x02` | `x04`    | `x08`    | `x10` | `x20`    | `x40` | `x80`         |
-|:----------:|:---------:|:-----:|:--------:|:--------:|:-----:|:--------:|:-----:|:-------------:|
-| 3 (Right)  | Y         | X     | B        | A        | SR    | SL       | R     | ZR            |
-| 4 (Shared) | Minus     | Plus  | R Stick  | L Stick  | Home  | Capture  | --    | Charging Grip |
-| 5 (Left)   | Down      | Up    | Right    | Left     | SR    | SL       | L     | ZL            |
+|    Byte    | Bit `x01` | `x02` |  `x04`  |  `x08`  | `x10` |  `x20`  |                   `x40`                    |     `x80`     |
+| :--------: | :-------: | :---: | :-----: | :-----: | :---: | :-----: | :----------------------------------------: | :-----------: |
+| 3 (Right)  |     Y     |   X   |    B    |    A    |  SR   |   SL    |                     R                      |      ZR       |
+| 4 (Shared) |   Minus   | Plus  | R Stick | L Stick | Home  | Capture | 怀疑这个按键是用来同步的，重新匹配蓝牙按钮 | Charging Grip |
+|  5 (Left)  |   Down    |  Up   |  Right  |  Left   |  SR   |   SL    |                     L                      |      ZL       |
 
 Note that the button status of the L and R Joy-Cons can be ORed together to get a complete button status.
 
 #### Standard input report - Stick data
+
+摇杆数据是共享的，所以中间字节的低4位是x轴向的高4位，中间字节的高四位是y轴向的低四位
+
+| 轴   | 高4位           | 低8位                                      |
+| ---- | --------------- | ------------------------------------------ |
+| x    | data[1]的低四位 | data[0]                                    |
+| y    | data[2]的高4位  | data[2]的低4位左移4位+data[1]高四位右移4位 |
+
+
 
 The code below properly decodes the stick data:
 

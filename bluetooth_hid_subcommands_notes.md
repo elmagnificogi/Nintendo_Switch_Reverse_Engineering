@@ -21,6 +21,8 @@ The procedure must be done sequentially:
 - 1: x01 x01 [{BD_ADDR_LE}] (Send host MAC and acquire Joy-Con MAC)
 - 2: x01 x02 (Acquire the XORed LTK hash)
 - 3: x01 x03 (saves pairing info in Joy-Con)
+- 4: x01 x04 (Fast pair request)
+step 1:
 
 Host Pair request x01 (send HOST BT MAC and request Joy-Con BT MAC):
 
@@ -38,51 +40,121 @@ Joy-Con Pair request x01 reply:
 |  1-6   | `x57 30 EA 8A BB 7C` | Joy-Con BT MAC in Little-Endian |
 |  7-31  |                      | Descriptor?                     |
 
-Host Pair request x03 (request LTK):
+step 2:
 
-Joy-Con Pair request x02 reply:
+  Host Pair request x02 (request LTK):
 
-Long Term Key (LTK) in Little-Endian. Each byte is XORed with 0xAA.
+| Byte # | Sample               | Remarks                                 |
+|:------:|:--------------------:| --------------------------------------- |
+|  0     | `x01`                | subcmd                                  |
+|  1     | `x02`                | Pair request type                       |
+|  2-37  | `x10 d4 3d 05 00 00 00 00 cb d9 da 2a 00 00 00 94 08 b0 3d 05 00 00 00 98 0f d4 3d 05 00 00 00 70 10 d4 3d 05` | Not fixed, unknown |
 
-Host Pair request x03:
+  Joy-Con Pair request x02 reply:
 
+| Byte # | Sample               | Remarks                                 |
+|:------:|:--------------------:| --------------------------------------- |
+|  0     | `x02`                | Pair request type                       |
+|  1-16  | `x58 33 c4 77 0c 57 26 b5 96 9e 6a df b4 41 43 49` | Long Term Key (LTK) in Little-Endian. Each byte is XORed with 0xAA. |
+
+step 3:
+
+  Host Pair request x03 (tell controller to save LTK):
+
+| Byte # | Sample               | Remarks                                 |
+|:------:|:--------------------:| --------------------------------------- |
+|  0     | `x01`                | subcmd                                  |
+|  1     | `x03`                | Pair request type                       |
+|  2-37  | same as step 2       | Not fixed, unknown                      |
 Joy-Con saves pairing info in x2000 SPI region.
 
+| Byte # | Sample               | Remarks                                 |
+|:------:|:--------------------:| --------------------------------------- |
+|  0     | `x03`                | Pair request type                       |
+
+step 4: (seems to replace step 1)
+
+  Host Pair request x04 (send HOST BT MAC and name):
+
+| Byte # | Sample               | Remarks                                 |
+|:------:|:--------------------:| --------------------------------------- |
+|  0     | `x01`                | subcmd                                  |
+|  1     | `x04`                | Pair request type                       |
+|  2-7   | `x16 30 AA 82 BB 98` | Host Bluetooth address in Little-Endian |
+|  8-9   | `x00 04 3c`          | Fixed bytes, unknown meaning            |
+|  10~30 | `x4e 69 6e 74 65 6e 64 6f 20 53 77 69 74 63 68 00 00 00 00 00 68` | 21 bytes data. "Nintendo Switch" in Ascii, filled with `00` and end with `68`|
+|  31~36 | `x00 14 06 b3 3d 05` | Not fixed, unknown                      |
+
+  Joy-Con Pair request x04 reply:
+
+
+| Byte # | Sample               | Remarks                         |
+|:------:|:--------------------:| ------------------------------- |
+|  0     | `x01`/`x03`          | Pair request type (**NOTE:** byte#1~29 is `x00` when replies `x03`)|
+|  1-6   | `x57 30 EA 8A BB 7C` | Joy-Con BT MAC in Little-Endian |
+|  7-8   | `x25 08`             | Fixed bytes, unknown meaning    |
+|  9-29  | `4a 6f 79 2d 43 6f 6e 20 28 52 29 00 00 00 00 00 00 00 00 00 68` | 21 bytes data. "Joy-Con (R)" in Ascii, filled with `00` and end with `68`|
+
+  **NOTE**
+
+    *when no paired data in spi_memory@x2000, Joy-Con replies `x01` asking for new pairing session and goto step 2*
+      
+    *when valid paried data in spi_memory@x2000, Joy-Con replies `x03` to end this pairing session*
 If the command is `x11`, it polls the MCU State? Used with IR Camera or NFC?
 
-### Subcommand 0x02: Request device info
+* TODO: refer to `spi_memory@0x00002000` 
+
+### Subcommand 0x02: 获取设备信息
+
+- 02子命令也有一个奇怪的地方，他的ack是82，为什么是82而不是80？
 
 Response data after 02 command byte:
 
-| Byte # | Sample               | Remarks                                                  |
-|:------:|:--------------------:| -------------------------------------------------------- |
-|  0-1   | `x03 48`             | Firmware Version. Latest is 3.89 (from 5.0.0 and up).    |
-|  2     | `x01`                | 1=Left Joy-Con, 2=Right Joy-Con, 3=Pro Controller.       |
-|  3     | `x02`                | Unknown. Seems to be always `02`                         |
+| Byte # |        Sample        | Remarks                                                  |
+| :----: | :------------------: | -------------------------------------------------------- |
+|  0-1   | `x03 48`             | Firmware Version. Latest is 4.06 (from 5.0.0 and up).    |
+|   2    |        `x01`         | 1=Left Joy-Con, 2=Right Joy-Con, 3=Pro Controller.       |
+|   3    |        `x02`         | Unknown. Seems to be always `02`                         |
 |  4-9   | `x7C BB 8A EA 30 57` | Joy-Con MAC address in Big Endian                        |
-|  10    | `x01`                | Unknown. Seems to be always `01`                         |
-|  11    | `x01`                | If `01`, colors in SPI are used. Otherwise default ones. |
+|  10    | `x01`/`x03`          | Unknown. Seems to be always `01`(`03` for 10.0.+)        |
+|   11   |        `x01`         | If `01`, colors in SPI are used. Otherwise default ones. |
 
-### Subcommand 0x03: Set input report mode
+这里有一个问题，就是byte10为什么以前是1现在是3，没有任何解释，这个是我看到改变了的东西
+
+byte11，这里如果是01，则会去SPI读flash获取手柄的皮肤颜色，如果是0，那就是默认颜色
+
+但是好像不管设置是0还是1，SPI读flash颜色区域的命令都会发送
+
+### Subcommand 0x03: 设置输入报文的模式
 
 One argument:
 
-| Arg #  | Remarks                                                                                          |
-|:------:| ------------------------------------------------------------------------------------------------ |
-|  `x00` | Used with cmd `x11`. Active polling for NFC/IR camera data. 0x31 data format must be set first.  |
-|  `x01` | Same as `00`. Active polling mode for NFC/IR MCU configuration data.                             |
-|  `x02` | Same as `00`. Active polling mode for NFC/IR data and configuration. For specific NFC/IR modes   |
-|  `x03` | Same as `00`. Active polling mode for IR camera data. For specific IR modes                      |
-|  `x23` | MCU update state report?                                                                         |
-|  `x30` | Standard full mode. Pushes current state @60Hz                                                   |
-|  `x31` | NFC/IR mode. Pushes large packets @60Hz                                                          |
-|  `x33` | Unknown mode.                                                                                    |
-|  `x35` | Unknown mode.                                                                                    |
-|  `x3F` | Simple HID mode. Pushes updates with every button press                                          |
+| Arg # | Remarks                                                      |
+| :---: | ------------------------------------------------------------ |
+| `x00` | Used with cmd `x11`. Active polling for NFC/IR camera data. 0x31 data format must be set first.激活红外摄像头和NFC输入模式 |
+| `x01` | Same as `00`. Active polling mode for NFC/IR MCU configuration data.激活红外摄像头和NFC MCU配置文件数据 |
+| `x02` | Same as `00`. Active polling mode for NFC/IR data and configuration. For specific NFC/IR modes激活红外摄像头和NFC数据和配置？ |
+| `x03` | Same as `00`. Active polling mode for IR camera data. For specific IR modes  红外摄像头模式 |
+| `x23` | MCU update state report? 主控更新状态报告？                  |
+| `x30` | Standard full mode. Pushes current state @60Hz 标准完整报告模式，数据速率60hz |
+| `x31` | NFC/IR mode. Pushes large packets @60Hz 红外摄像头和NFC报告模式，数据速率60hz |
+| `x33` | Unknown mode.                                                |
+| `x35` | Unknown mode.                                                |
+| `x3F` | Simple HID mode. Pushes updates with every button press 简单HID模式，按下按键就发送报告的模式（可以理解为高响应模式？） |
 
-`x31` input report has all zeroes for IR/NFC data if a `11` ouput report with subcmd `03 00/01/02/03` was not sent before.
+`x31` input report has all zeroes for IR/NFC data if a `11` ouput report with subcmd `03 00/01/02/03` was not sent before.如果要用31模式的话 必须保证之前没有发送过00 01 02 03 模式
 
-### Subcommand 0x04: Trigger buttons elapsed time
+
+
+### Subcommand 0x04: 设置按键触发时间
+
+LSB是10ms，所以最短都要触发10ms
+
+这个按键触发时间的准确理解应该是，按下这个按钮以后判定触发了？
+
+具体啥意思没看懂，理论上全0 也可以?代码中有的长有的短，完全不一致
+
+设置全0以后好像触发变快了
 
 Replies with 7 little-endian uint16. The values are in 10ms. They reset by turning off the controller.
 
@@ -131,7 +203,11 @@ All extra modes default to sleep mode if nothing happens. This is a R1 page scan
 
 Initializes the 0x2000 SPI section.
 
-### Subcommand 0x08: Set shipment low power state
+### Subcommand 0x08: 设置低功耗模式
+
+简单说就是有一个参数，这个参数如果是00，那么就是不开启低功耗模式，如果是01就是开启低功耗模式。
+
+不开启的情况下，按下任意按钮可以唤醒机器
 
 Takes as argument `x00` or `x01`.
 
@@ -143,7 +219,8 @@ This is useful when the controllers ship, because the controller cannot wake up 
 
 Switch always sends `x08 00` subcmd after every connection, and thus enabling Triggered Broadcom Fast Connect and LPM mode to SLEEP.
 
-### Subcommand 0x10: SPI flash read
+### Subcommand 0x10: SPI读取flash
+
 Little-endian int32 address, int8 size, max size is `x1D`.
 Replies with `x9010` ack and echoes the request info, followed by `size` bytes of data.
 
@@ -160,6 +237,20 @@ Response: INPUT 21
                                                        ^ length = 0x18 bytes
                                                           ^~~~~ data
 ```
+
+如果读取的是0x6050，就是颜色存储的寄存器
+
+```
+/* 0x6050 : color reg
+ * #323232 - black
+ * #313232 - Splatoon
+ * #323132 - Xenoblade
+ */
+```
+
+回复这一条的时候基本全回0了
+
+连接以后还会读取0x6080，0x6098,0x8010,0x603D,0x6020不知道是啥玩意
 
 ### Subcommand 0x11: SPI flash Write
 
@@ -179,7 +270,29 @@ Write configuration data to MCU. This data can be IR configuration, NFC configur
 
 Takes 38 or 37 bytes long argument data.
 
-Replies with ACK `xA0` `x20` and 34 bytes of data.
+Replies with ACK `xA0` `x21` and 34 bytes of data.
+
+这里回复也不是0xA0而是0x80，否则会发现一直重复发这个命令
+Host send config:
+
+| Byte # |  Sample               | Remarks                      |
+|:------:|:---------------------:|------------------------------|
+| 0      | `x21`                 | subcmd id                    |
+| 1      | `x21`/`x23`           | set MCU mode / write MCU reg |
+| 2-36   | `x00...`              | config data                  |
+| 37     | `x00`                 | crc8, sum #1-#36, 36 bytes   |
+
+Controller replies:
+
+| Byte # |  Sample               | Remarks                      |
+|:------:|:---------------------:|------------------------------|
+| 0      | `x21`                 | reply id                     |
+| 1      | `x01`                 | config done(?)               |
+| 2-3    | `x00 ff`              | unknown                      |
+| 4-5    | `x00 03`              | `x00 03` fixed when NS10.0.+ & Pro3.86 |
+| 6-7    | `x00 05`              | `x00 05` fixed when NS10.0.+ & Pro3.86 |
+| 8      | `x01`                 | MCU state standby            |
+| 34     | `x5c`                 | crc8, sum #1-#33, 33 bytes   |
 
 ### Subcommand 0x22: Set NFC/IR MCU state
 
@@ -231,7 +344,7 @@ Replies always with ACK `x00` `x2A`.
 
 Replies with ACK `xA9` `x2B` and 20 bytes long data (which has also a part from x24 subcmd).
 
-### Subcommand 0x30: Set player lights
+### Subcommand 0x30: 设置手柄灯
 
 First argument byte is a bitfield:
 
@@ -242,7 +355,6 @@ aaaa bbbb
 ```
 
 On overrides flashing. When on USB, flashing bits work like always on bits.
-
 
 ### Subcommand 0x31: Get player lights
 
@@ -303,7 +415,7 @@ Table of Mini Cycle configuration:
 | `x23`, Low     | Unused                                    |
 | `x24` High/Low | Fading/LED Duration Multipliers for MC 15 |
 
-### Subcommand 0x40: Enable IMU (6-Axis sensor)
+### Subcommand 0x40: 使能IMU
 
 One argument of `x00` Disable  or `x01` Enable.
 

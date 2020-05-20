@@ -2,6 +2,8 @@
 
 Both the Pro Controller and the Charging Joy-Con Grip support communication over USB HID. Both use identical STM32s and both, for the most part, have the same firmware for the micro-controller. The only significant difference is that the grip exposes two interfaces for talking with each Joy-Con individually, and the Pro Controller only exposes one. Additionally, the Pro Controller firmware seems to have functionality for ignoring checksums if the Broadcom chip sends a 00 checksum for its first reply.
 
+pro和joy-con的完全体基本上协议都是一样的，只是joy-con完全体的时候通信是两个接口独立完成，而pro是一个接口完成，都是基于USB HID的
+
 ## HID Protocol
 
 The STM32 handles most UART communication for handshaking. HID commands may start with an 01, 10, or 80. 80 seems to contain all of Nintendo's custom protocol.
